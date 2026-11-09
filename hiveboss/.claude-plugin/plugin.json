@@ -1,7 +1,7 @@
 {
   "name": "hiveboss",
   "displayName": "HiveBoss Connect",
-  "version": "0.5.5",
+  "version": "0.5.7",
   "description": "HiveBoss Connect: publish your work into your team's HiveBoss room and read what the team already decided, without leaving Claude Code.",
   "author": {
     "name": "HiveBoss",
@@ -20,7 +20,7 @@
     "mcp_url": {
       "type": "string",
       "title": "HiveBoss MCP server URL",
-      "description": "The HiveBoss environment this plugin connects to. The installer sets it to the URL of the HiveBoss it was downloaded from; change it only to move to another HiveBoss environment, then sign in again with /mcp.",
+      "description": "The HiveBoss environment this plugin connects to. The installer sets it to the URL of the HiveBoss it was downloaded from. Change it only to move to another HiveBoss environment. To sign in again, run hiveboss connect in a terminal (without the HiveBoss CLI: /mcp).",
       "default": "https://api.hiveboss.ai/mcp"
     }
   }
