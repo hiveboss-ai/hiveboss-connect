@@ -1,21 +1,23 @@
 {
-  "description": "HiveBoss: the room brief on a session's first prompt (through the plugin's own MCP connection; the prompt itself is not sent), the repo name at session start, a once-per-session publish offer, the once-per-session \"Run /hiveboss\" nudge shown to the person when HiveBoss says the session is none of their agents, and (when HiveBoss has the diary on) a once-per-session offer to write a diary, which only offers and never sends. Prompt context is the separate hiveboss-context plugin. With canon parity on (HiveBoss Playbook), it also delivers the Hive Playbook floor at session start from a local pack cache, and applies the cached deny rules and path reminders before tool calls, locally, with no network call (Claude Code only: Codex has no plugin pre-tool hook here, a listed exception). In an agent's home it also reminds the agent to update STATE.md when the conversation is compacted (PreCompact marks it, SessionStart after the compaction says it).",
+  "description": "HiveBoss: the room brief on a session's first prompt (through the plugin's own MCP connection; the prompt itself is not sent), the repo name at session start, a once-per-session publish offer, the once-per-session \"Run /hiveboss\" nudge shown to the person when HiveBoss says the session is none of their agents, and (when HiveBoss has the diary on) a once-per-session offer to write a diary, which only offers and never sends. Prompt context is the separate hiveboss-context plugin. With canon parity on (HiveBoss Playbook), it also delivers the Hive Playbook floor at session start from a local pack cache, and applies the cached deny rules and path reminders before tool calls, locally, with no network call (Claude Code only: Codex has no plugin pre-tool hook here, a listed exception). In an agent's home it also reminds the agent to update STATE.md when the conversation is compacted (PreCompact marks it, SessionStart after the compaction says it). With HiveBoss's work diary on for the person (agents-log-work-sessions), the Stop hook asks the agent once per stretch of real work (4 or more edits, commits, deploys or HiveBoss posts since its last log_session) to add the session to today's work diary, showing a person their notes first, never in a headless run; after each send it keeps the day's entry as ~/diary/<date>-<name>.md (a Bee's in its home's diary/), capped at 64 KB a file and 20 MB a folder.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "session-start"
             ],
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
               "session-start"
             ],
             "timeout": 5
@@ -27,8 +29,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "after-compact"
             ],
             "timeout": 5
@@ -55,16 +58,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
               "prompt"
             ],
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "busy"
             ],
             "timeout": 5
@@ -78,8 +83,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
               "deny"
             ],
             "timeout": 5
@@ -91,8 +97,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
               "paths"
             ],
             "timeout": 5
@@ -106,8 +113,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "mark-changed"
             ],
             "timeout": 5
@@ -119,8 +127,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "mark-published"
             ],
             "timeout": 5
@@ -132,8 +141,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
+              "capture"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_hiveboss_hiveboss__(log_session|agent_change)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-log.mjs",
               "capture"
             ],
             "timeout": 5
@@ -146,8 +170,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "stop"
             ],
             "timeout": 5
@@ -162,6 +187,19 @@
             "timeout": 2
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-log.mjs",
+              "stop"
+            ],
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -169,8 +207,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.sh",
+            "command": "node",
             "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-state.mjs",
               "pre-compact"
             ],
             "timeout": 5

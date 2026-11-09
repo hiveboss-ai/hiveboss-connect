@@ -2,7 +2,8 @@
   "mcpServers": {
     "hiveboss": {
       "type": "http",
-      "url": "${user_config.mcp_url}"
+      "url": "${user_config.mcp_url}",
+      "headersHelper": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-headers.mjs\""
     },
     "knowledge": {
       "type": "stdio",

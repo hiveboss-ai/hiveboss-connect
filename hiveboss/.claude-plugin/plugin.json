@@ -1,7 +1,7 @@
 {
   "name": "hiveboss",
   "displayName": "HiveBoss Connect",
-  "version": "0.5.2",
+  "version": "0.5.5",
   "description": "HiveBoss Connect: publish your work into your team's HiveBoss room and read what the team already decided, without leaving Claude Code.",
   "author": {
     "name": "HiveBoss",

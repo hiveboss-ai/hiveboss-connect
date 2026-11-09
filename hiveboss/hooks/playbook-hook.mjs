@@ -41,9 +41,9 @@
 // one rule engine for the server and this hook); the parity harness runs both against canon's hooks.
 
 import { createHash } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { evaluateDeny, evaluateLayers, fieldValue, layerHookDecision, matchPaths, packDenyToLayer } from "./playbook-rules.mjs";
 
@@ -428,7 +428,12 @@ export function run(mode, raw, env = process.env) {
 
 const isMain = (() => {
 	try {
-		return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+		// Node started with this file (hooks.json runs `node <this file>`), not a test importing it. Compared as real
+		// paths, so a symlinked plugin folder or, on Windows, a drive letter in another case still runs the hook.
+		if (!process.argv[1]) return false;
+		const a = realpathSync(process.argv[1]);
+		const b = realpathSync(fileURLToPath(import.meta.url));
+		return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 	} catch {
 		return false;
 	}
