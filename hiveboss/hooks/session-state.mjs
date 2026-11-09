@@ -3,7 +3,9 @@
 // macOS, Linux and Windows (hooks.json runs `node` with this file as its first argument:
 // a .sh file cannot be started on Windows, EFTYPE; decision 2026-11-04-plugin-hooks-node).
 //
-//   session-state.mjs session-start    SessionStart: names the git repo for bare commands (none outside git)
+//   session-state.mjs session-start    SessionStart: names the git repo for bare commands (none outside git);
+//                                      on a computer with no browser (SSH, or Linux with no display) that has no
+//                                      HiveBoss sign-in, says to run `hiveboss connect` there (a code, no browser)
 //   session-state.mjs mark-changed     PostToolUse on Edit|Write|MultiEdit|NotebookEdit
 //   session-state.mjs mark-published   PostToolUse on publish_page
 //   session-state.mjs busy             UserPromptSubmit: marks the session busy (the listener never wakes it then)
@@ -12,7 +14,8 @@
 //   session-state.mjs pre-compact      PreCompact: in an agent's home, marks that STATE.md needs updating
 //   session-state.mjs after-compact    SessionStart (compact): then reminds the agent to update STATE.md
 //
-// Runs on this machine only: no network, no token, no prompt text sent anywhere
+// Runs on this machine only: no network, no token, no prompt text sent anywhere (session-start only looks at
+// which sign-in fields are present in the CLI's and Claude Code's credential files; no value is read out or kept)
 // (the first Stop only searches the session's transcript for HiveBoss's nudge
 // line). State is empty marker files per session under the plugin's data directory
 // (${CLAUDE_PLUGIN_DATA}/sessions), mode 700, pruned after 7 days. Never blocks:
@@ -27,11 +30,16 @@ const SID_OK = /^[A-Za-z0-9._-]+$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const NUDGE_SEEN = "This session isn't one of your agents yet.";
-export const NUDGE_SHOWN = "HiveBoss: this session isn't one of your agents yet. Run /hiveboss to set it up.";
+export const NUDGE_SHOWN = "HiveBoss: this session isn't one of your agents yet. To set it up, run hiveboss connect in a terminal.";
 export const PUBLISH_OFFER =
 	"HiveBoss: this session changed files and nothing was published to HiveBoss. End your reply with one short sentence offering to publish this work to the HiveBoss room as a page, saying in a few words what the page would hold, and wait. Do not call any HiveBoss tool now: publish only after the person says yes. Offer once; do not repeat it.";
 export const COMPACT_REMINDER =
 	"HiveBoss: this conversation was just compacted. Before going on, update STATE.md with the state_update tool: what you have in flight and your open items, so nothing is lost at the next compaction or run.";
+
+export const REMOTE_SIGN_IN_SHOWN =
+	"HiveBoss: this computer is not signed in to HiveBoss. In a terminal on this computer, run: hiveboss connect. Type the code it shows at the address it shows, in a browser where you are signed in to HiveBoss.";
+export const REMOTE_SIGN_IN_CONTEXT =
+	"HiveBoss: this computer is reached over SSH or has no display, and HiveBoss is not signed in here. The authenticate tool of the HiveBoss server opens a browser sign-in that cannot come back to this computer. If the person wants HiveBoss, tell them to run `hiveboss connect` in a terminal on this computer. They type the code it shows at the address it shows, in a browser where they are signed in to HiveBoss. A new session then has the HiveBoss tools (in this one: /mcp, then reconnect plugin:hiveboss:hiveboss). If `hiveboss` is not found, the installer comes first: curl -fsSL https://hiveboss.ai/connect | sh. Never run hiveboss connect yourself, and never ask for the code.";
 
 /** `${NAME:-}` in sh: unset and empty are the same. */
 const envOf = (env, name) => (typeof env[name] === "string" && env[name] !== "" ? env[name] : "");
@@ -102,6 +110,87 @@ function repoName(env) {
 	return repo.replace(/[\u0000-\u001f]/g, "");
 }
 
+/**
+ * Where a browser sign-in cannot come back (the CLI's remoteSession, 2026-10-17 and AGH2): "ssh" over SSH (in tmux,
+ * only when tmux says the client attached now is SSH), "headless" on Linux with no display, else null.
+ */
+export function remoteSession(env, platform = process.platform, tmuxSsh = tmuxSshNow) {
+	let ssh = Boolean(envOf(env, "SSH_CONNECTION") || envOf(env, "SSH_TTY"));
+	if (ssh && envOf(env, "TMUX")) {
+		const now = tmuxSsh(env);
+		if (now === false) ssh = false;
+		else if (now === null && !envOf(env, "SSH_CONNECTION") && !ttyLive(envOf(env, "SSH_TTY"))) ssh = false;
+	}
+	if (ssh) return "ssh";
+	if (platform === "linux" && !envOf(env, "DISPLAY") && !envOf(env, "WAYLAND_DISPLAY")) return "headless";
+	return null;
+}
+
+function tmuxSshNow(env) {
+	try {
+		const r = spawnSync("tmux", ["show-environment", "SSH_CONNECTION"], { encoding: "utf8", env, timeout: 1500, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+		const line = r.status === 0 ? String(r.stdout ?? "").trim() : "";
+		return line === "-SSH_CONNECTION" ? false : line.startsWith("SSH_CONNECTION=") ? true : null;
+	} catch {
+		return null;
+	}
+}
+
+function ttyLive(path) {
+	try {
+		return Boolean(path) && statSync(path).isCharacterDevice();
+	} catch {
+		return false;
+	}
+}
+
+/** True when the HiveBoss CLI on this computer holds a sign-in (its credential.json names a server). */
+export function cliSignedIn(env) {
+	const home = envOf(env, "HIVEBOSS_CLI_HOME") || (envOf(env, "HOME") ? join(envOf(env, "HOME"), ".hiveboss", "cli") : "");
+	if (!home) return true;
+	try {
+		const record = JSON.parse(readFileSync(join(home, "credential.json"), "utf8"));
+		return Boolean(record && typeof record === "object" && record.mcpUrl);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * True when Claude Code holds a HiveBoss plugin OAuth sign-in (an access or refresh token on a
+ * plugin:hiveboss:hiveboss entry): ~/.claude/.credentials.json (or $CLAUDE_CONFIG_DIR), else on macOS the keychain
+ * item Claude Code writes. Only which fields are present is looked at. Unreadable: false.
+ */
+export function claudePluginSignedIn(env, platform = process.platform, run = spawnSync) {
+	const dir = envOf(env, "CLAUDE_CONFIG_DIR") || (envOf(env, "HOME") ? join(envOf(env, "HOME"), ".claude") : "");
+	if (!dir) return false;
+	let credentials = null;
+	try {
+		credentials = JSON.parse(readFileSync(join(dir, ".credentials.json"), "utf8"));
+	} catch {}
+	if (!credentials && platform === "darwin" && !envOf(env, "CLAUDE_CONFIG_DIR")) {
+		try {
+			const r = run("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 1500 });
+			if (r.status === 0) credentials = JSON.parse(String(r.stdout ?? ""));
+		} catch {}
+	}
+	const entries = credentials && typeof credentials.mcpOAuth === "object" && credentials.mcpOAuth ? Object.entries(credentials.mcpOAuth) : [];
+	return entries.some(([key, v]) => key.startsWith("plugin:hiveboss:hiveboss|") && v && typeof v === "object" && Boolean(v.accessToken || v.refreshToken));
+}
+
+/**
+ * The no-browser sign-in hint, or null: only on a computer where a browser sign-in cannot come back, where the
+ * HiveBoss CLI is installed and not signed in, and where Claude Code holds no HiveBoss plugin sign-in.
+ */
+export function remoteSignInHint(env, platform = process.platform, probes = {}) {
+	const home = envOf(env, "HIVEBOSS_CLI_HOME") || (envOf(env, "HOME") ? join(envOf(env, "HOME"), ".hiveboss", "cli") : "");
+	if (!home || !existsSync(join(home, "hiveboss.mjs"))) return null;
+	if (!(probes.remote ?? remoteSession)(env, platform)) return null;
+	if ((probes.cli ?? cliSignedIn)(env)) return null;
+	if ((probes.claude ?? claudePluginSignedIn)(env, platform)) return null;
+	return { shown: REMOTE_SIGN_IN_SHOWN, context: REMOTE_SIGN_IN_CONTEXT };
+}
+
 function prune(dir) {
 	try {
 		const now = Date.now();
@@ -146,12 +235,15 @@ export function run(action, raw, env = process.env) {
 		switch (action) {
 			case "session-start": {
 				const repo = repoName(env);
-				if (!repo) return out;
+				let hint = null;
+				try {
+					hint = remoteSignInHint(env);
+				} catch {}
+				const context = [repo ? `HiveBoss: this session works in the repository "${repo}". Pass repo: "${repo}" to HiveBoss tools so bare commands use its room. Read hiveboss://skill/connector before your first HiveBoss call.` : "", hint ? hint.context : ""].filter(Boolean);
+				if (context.length === 0) return out;
 				out.stdout = `${JSON.stringify({
-					hookSpecificOutput: {
-						hookEventName: "SessionStart",
-						additionalContext: `HiveBoss: this session works in the repository "${repo}". Pass repo: "${repo}" to HiveBoss tools so bare commands use its room. Read hiveboss://skill/connector before your first HiveBoss call.`,
-					},
+					...(hint ? { systemMessage: hint.shown } : {}),
+					hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context.join("\n\n") },
 				})}\n`;
 				return out;
 			}
