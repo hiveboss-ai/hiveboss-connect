@@ -17,7 +17,9 @@
 //                             HiveBoss sent it back (a person's preview before it is sent, then the sent entry), to ~/diary/<date>-<name>.md (a Bee's: ~/hiveboss/agents/<slug>/diary/),
 //                             replacing it on each send (REQ-ALS8). Capped (REQ-ALS13): 64 KB a file, 20 MB of copies a
 //                             folder, the oldest copies this hook wrote removed first.
-//   session-log.mjs usage     PreToolUse on log_session (REQ-ALS18, awaiting Adam's yes; off unless the person opted in):
+//   session-log.mjs usage     PreToolUse on log_session (REQ-ALS18; off unless the person opted in, or the Hive's
+//                             "Share token counts" is on, read from the newest work diary line's "token counts shared",
+//                             and the person did not opt out):
 //                             puts this computer's token counts for today, read by code from the local Claude Code
 //                             transcripts (local-usage.mjs), into the call as localUsage (source "local transcript"),
 //                             and removes any localUsage a model wrote. A confirm call reuses its preview's numbers, so
@@ -105,6 +107,7 @@ export function readTranscript(transcriptPath) {
 	let logging = null;
 	let loggingAt = 0;
 	let showFirst = false;
+	let tokensShared = false;
 	const text = readFileSync(transcriptPath, "utf8");
 	for (const line of text.split("\n")) {
 		const hasTool = line.includes('"tool_use"');
@@ -121,6 +124,7 @@ export function readTranscript(transcriptPath) {
 			if (m) {
 				logging = m[1];
 				showFirst = /show first/.test(m[3] ?? "");
+				tokensShared = /token counts shared/.test(m[3] ?? "");
 				loggingAt = timeOf(d?.timestamp);
 			}
 		}
@@ -137,7 +141,7 @@ export function readTranscript(transcriptPath) {
 			if (isRealWork(name, c.input)) work++;
 		}
 	}
-	return { work, logs, logging, loggingAt, showFirst };
+	return { work, logs, logging, loggingAt, showFirst, tokensShared };
 }
 
 /** The person's setting as the plugin last saw HiveBoss say it (capture), or null. */
@@ -351,6 +355,21 @@ export function capture(input, env = process.env, now = Date.now()) {
 }
 
 /**
+ * REQ-ALS18 (decision 2026-11-26-hive-share-token-counts): whether the Hive's "Share token counts" is on, as the newest
+ * work diary line HiveBoss's prompt hook put in this transcript says ("token counts shared"). No line or no transcript: off.
+ */
+export function hiveSharesTokens(input) {
+	const tp = input?.transcript_path;
+	if (typeof tp !== "string" || !tp || !existsSync(tp)) return false;
+	try {
+		const t = readTranscript(tp);
+		return t.logging === "on" && t.tokensShared === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * REQ-ALS18: the PreToolUse answer for log_session, or null to leave the call as it is. Only code fills localUsage: a
  * value a model wrote is always removed. With the person's opt-in off, that is all it does.
  */
@@ -359,7 +378,7 @@ export function usageDecision(input, env = process.env, now = Date.now()) {
 	const ti = input?.tool_input && typeof input.tool_input === "object" ? input.tool_input : null;
 	if (!ti) return null;
 	let usage = null;
-	if (!isOff(env.HIVEBOSS_SESSION_LOG) && localSpendOn(env)) {
+	if (!isOff(env.HIVEBOSS_SESSION_LOG) && localSpendOn(env, hiveSharesTokens(input))) {
 		const sid = SID_OK.test(String(ti.sessionId ?? "")) ? String(ti.sessionId) : sidOf(input);
 		const f = sid ? join(stateDir(env), `${fileSafe(sid)}.usage.json`) : "";
 		const cached = f ? readJson(f) : null;
