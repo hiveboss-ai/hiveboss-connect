@@ -17,6 +17,11 @@
 //                             HiveBoss sent it back (a person's preview before it is sent, then the sent entry), to ~/diary/<date>-<name>.md (a Bee's: ~/hiveboss/agents/<slug>/diary/),
 //                             replacing it on each send (REQ-ALS8). Capped (REQ-ALS13): 64 KB a file, 20 MB of copies a
 //                             folder, the oldest copies this hook wrote removed first.
+//   session-log.mjs usage     PreToolUse on log_session (REQ-ALS18, awaiting Adam's yes; off unless the person opted in):
+//                             puts this computer's token counts for today, read by code from the local Claude Code
+//                             transcripts (local-usage.mjs), into the call as localUsage (source "local transcript"),
+//                             and removes any localUsage a model wrote. A confirm call reuses its preview's numbers, so
+//                             what is sent is what the person was shown. Never a cost.
 //
 // Off switches: HIVEBOSS_SESSION_LOG=off (no asks, no copies), HIVEBOSS_SESSION_LOG_LOCAL=off (no copies); the
 // person's own setting through agent_change (sessionLogging). Runs on this machine only: no network, no token. State is
@@ -27,7 +32,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { localSpendOn, localUsageToday } from "./local-usage.mjs";
+
 export const WORK_BEFORE_ASK = 4;
+/**
+ * The usage hook changes the input only (updatedInput) and sets no permissionDecision, so the call's normal permission
+ * rules still apply to it (code.claude.com/docs/en/hooks, PreToolUse decision control).
+ */
+const USAGE_PERMISSION = {};
 export const DONE_LINE = "I've added this session to today's work diary.";
 /** The prefix HiveBoss's prompt hook writes (packages/api/modules/connector/lib/work-diary-flag.ts DIARY_LINE_PREFIX). */
 export const LINE_PREFIX = "HiveBoss work diary:";
@@ -330,8 +342,37 @@ export function capture(input, env = process.env, now = Date.now()) {
 	if (s && typeof s.logging === "boolean") writeJson(join(stateDir(env), "setting.json"), { logging: s.logging, localCopies: s.localCopies !== false, showFirst: s.showFirst !== false, at });
 	// REQ-ALS16: a preview is the day's entry exactly as it will be sent: the file is the thing shown to the person.
 	const sent = reply?.ok === true && (reply.status === "added" || reply.status === "updated" || reply.status === "preview");
+	if (reply?.ok === true && (reply.status === "added" || reply.status === "updated")) {
+		const sid = SID_OK.test(String(input?.tool_input?.sessionId ?? "")) ? String(input.tool_input.sessionId) : sidOf(input);
+		if (sid) rmSync(join(stateDir(env), `${fileSafe(sid)}.usage.json`), { force: true });
+	}
 	if (!sent || isOff(env.HIVEBOSS_SESSION_LOG) || isOff(env.HIVEBOSS_SESSION_LOG_LOCAL) || s?.localCopies === false) return { wrote: s ? "setting" : "" };
 	return { wrote: writeDiaryCopy(env, input, reply.diary) };
+}
+
+/**
+ * REQ-ALS18: the PreToolUse answer for log_session, or null to leave the call as it is. Only code fills localUsage: a
+ * value a model wrote is always removed. With the person's opt-in off, that is all it does.
+ */
+export function usageDecision(input, env = process.env, now = Date.now()) {
+	if (!LOG_TOOL.test(String(input?.tool_name ?? ""))) return null;
+	const ti = input?.tool_input && typeof input.tool_input === "object" ? input.tool_input : null;
+	if (!ti) return null;
+	let usage = null;
+	if (!isOff(env.HIVEBOSS_SESSION_LOG) && localSpendOn(env)) {
+		const sid = SID_OK.test(String(ti.sessionId ?? "")) ? String(ti.sessionId) : sidOf(input);
+		const f = sid ? join(stateDir(env), `${fileSafe(sid)}.usage.json`) : "";
+		const cached = f ? readJson(f) : null;
+		// The send after a preview carries the preview's numbers: the entry sent is the entry shown.
+		if (typeof ti.confirm === "string" && cached?.usage) usage = cached.usage;
+		else {
+			usage = localUsageToday(env, now);
+			if (f && usage) writeJson(f, { usage, at: new Date(now).toISOString() });
+		}
+	}
+	if (!usage && !("localUsage" in ti)) return null;
+	const { localUsage: _dropped, ...rest } = ti;
+	return { hookSpecificOutput: { hookEventName: "PreToolUse", ...USAGE_PERMISSION, updatedInput: usage ? { ...rest, localUsage: usage } : rest } };
 }
 
 /** One hook call: the action, the raw hook JSON and the environment in; exit code 0 and stdout out. Never throws. */
@@ -344,6 +385,10 @@ export function run(action, raw, env = process.env, now = Date.now()) {
 		} catch {}
 		if (action === "stop") {
 			const d = stopDecision(input, env, now);
+			return { exitCode: 0, stdout: d ? `${JSON.stringify(d)}\n` : "" };
+		}
+		if (action === "usage") {
+			const d = usageDecision(input, env, now);
 			return { exitCode: 0, stdout: d ? `${JSON.stringify(d)}\n` : "" };
 		}
 		if (action === "capture") {

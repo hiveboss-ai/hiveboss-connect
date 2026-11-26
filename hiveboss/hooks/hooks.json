@@ -1,5 +1,5 @@
 {
-  "description": "HiveBoss: the room brief on a session's first prompt (through the plugin's own MCP connection; the prompt itself is not sent), the repo name at session start, a once-per-session publish offer, the once-per-session \"Run /hiveboss\" nudge shown to the person when HiveBoss says the session is none of their agents, and (when HiveBoss has the diary on) a once-per-session offer to write a diary, which only offers and never sends. Prompt context is the separate hiveboss-context plugin. With canon parity on (HiveBoss Playbook), it also delivers the Hive Playbook floor at session start from a local pack cache, and applies the cached deny rules and path reminders before tool calls, locally, with no network call (Claude Code only: Codex has no plugin pre-tool hook here, a listed exception). In an agent's home it also reminds the agent to update STATE.md when the conversation is compacted (PreCompact marks it, SessionStart after the compaction says it). With HiveBoss's work diary on for the person (agents-log-work-sessions), the Stop hook asks the agent once per stretch of real work (4 or more edits, commits, deploys or HiveBoss posts since its last log_session) to add the session to today's work diary, showing a person their notes first, never in a headless run; after each send it keeps the day's entry as ~/diary/<date>-<name>.md (a Bee's in its home's diary/), capped at 64 KB a file and 20 MB a folder.",
+  "description": "HiveBoss: the room brief on a session's first prompt (through the plugin's own MCP connection; the prompt itself is not sent), the repo name at session start, a once-per-session publish offer, the once-per-session \"Run /hiveboss\" nudge shown to the person when HiveBoss says the session is none of their agents, and (when HiveBoss has the diary on) a once-per-session offer to write a diary, which only offers and never sends. Prompt context is the separate hiveboss-context plugin. With canon parity on (HiveBoss Playbook), it also delivers the Hive Playbook floor at session start from a local pack cache, and applies the cached deny rules and path reminders before tool calls, locally, with no network call (Claude Code only: Codex has no plugin pre-tool hook here, a listed exception). In an agent's home it also reminds the agent to update STATE.md when the conversation is compacted (PreCompact marks it, SessionStart after the compaction says it). With HiveBoss's work diary on for the person (agents-log-work-sessions), the Stop hook asks the agent once per stretch of real work (4 or more edits, commits, deploys or HiveBoss posts since its last log_session) to add the session to today's work diary, showing a person their notes first, never in a headless run; after each send it keeps the day's entry as ~/diary/<date>-<name>.md (a Bee's in its home's diary/), capped at 64 KB a file and 20 MB a folder. With the person's opt-in (\"localSpend\": true in ~/.config/hiveboss/diary.json), a PreToolUse hook on log_session adds today's token counts read by code from this computer's Claude Code transcripts (never a cost). With HiveBoss's terminal sessions on for a Bee (bee-sessions-from-terminal, the Bee's owner turns it on), a session in that Bee's folder shows in HiveBoss as a Bee session: the prompt hook opens each turn (its prompt id, never the prompt), a PostToolBatch hook sends each batch's tool names and the path, command, pattern, address or query each was given (never a tool's output), and the Stop hook (session id, folder, prompt id; never the answer) receives, once, the messages people sent to the session from HiveBoss. Off, HiveBoss answers {} and keeps nothing. The Bee's answer of such a session shows there too (Hamza, 2026-11-17): a separate async Stop command hook hands the last answer to the HiveBoss CLI on this computer, which sends it only after HiveBoss says the session is an active terminal Bee session (switch on, toggle on, a session row), cut to HiveBoss's message limit; in any other session nothing is sent, and no mcp_tool hook ever carries the answer.",
   "hooks": {
     "SessionStart": [
       {
@@ -48,7 +48,8 @@
             "tool": "hook_context",
             "input": {
               "cwd": "${cwd}",
-              "session_id": "${session_id}"
+              "session_id": "${session_id}",
+              "prompt_id": "${prompt_id}"
             },
             "timeout": 5
           }
@@ -101,6 +102,20 @@
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/hooks/playbook-hook.mjs",
               "paths"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_hiveboss_hiveboss__log_session",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session-log.mjs",
+              "usage"
             ],
             "timeout": 5
           }
@@ -165,6 +180,143 @@
         ]
       }
     ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:hiveboss:hiveboss",
+            "tool": "hook_steps",
+            "input": {
+              "session_id": "${session_id}",
+              "cwd": "${cwd}",
+              "prompt_id": "${prompt_id}",
+              "t0": "${tool_calls.0.tool_name}",
+              "f0": "${tool_calls.0.tool_input.file_path}",
+              "c0": "${tool_calls.0.tool_input.command}",
+              "p0": "${tool_calls.0.tool_input.pattern}",
+              "u0": "${tool_calls.0.tool_input.url}",
+              "q0": "${tool_calls.0.tool_input.query}",
+              "t1": "${tool_calls.1.tool_name}",
+              "f1": "${tool_calls.1.tool_input.file_path}",
+              "c1": "${tool_calls.1.tool_input.command}",
+              "p1": "${tool_calls.1.tool_input.pattern}",
+              "u1": "${tool_calls.1.tool_input.url}",
+              "q1": "${tool_calls.1.tool_input.query}",
+              "t2": "${tool_calls.2.tool_name}",
+              "f2": "${tool_calls.2.tool_input.file_path}",
+              "c2": "${tool_calls.2.tool_input.command}",
+              "p2": "${tool_calls.2.tool_input.pattern}",
+              "u2": "${tool_calls.2.tool_input.url}",
+              "q2": "${tool_calls.2.tool_input.query}",
+              "t3": "${tool_calls.3.tool_name}",
+              "f3": "${tool_calls.3.tool_input.file_path}",
+              "c3": "${tool_calls.3.tool_input.command}",
+              "p3": "${tool_calls.3.tool_input.pattern}",
+              "u3": "${tool_calls.3.tool_input.url}",
+              "q3": "${tool_calls.3.tool_input.query}",
+              "t4": "${tool_calls.4.tool_name}",
+              "f4": "${tool_calls.4.tool_input.file_path}",
+              "c4": "${tool_calls.4.tool_input.command}",
+              "p4": "${tool_calls.4.tool_input.pattern}",
+              "u4": "${tool_calls.4.tool_input.url}",
+              "q4": "${tool_calls.4.tool_input.query}",
+              "t5": "${tool_calls.5.tool_name}",
+              "f5": "${tool_calls.5.tool_input.file_path}",
+              "c5": "${tool_calls.5.tool_input.command}",
+              "p5": "${tool_calls.5.tool_input.pattern}",
+              "u5": "${tool_calls.5.tool_input.url}",
+              "q5": "${tool_calls.5.tool_input.query}",
+              "t6": "${tool_calls.6.tool_name}",
+              "f6": "${tool_calls.6.tool_input.file_path}",
+              "c6": "${tool_calls.6.tool_input.command}",
+              "p6": "${tool_calls.6.tool_input.pattern}",
+              "u6": "${tool_calls.6.tool_input.url}",
+              "q6": "${tool_calls.6.tool_input.query}",
+              "t7": "${tool_calls.7.tool_name}",
+              "f7": "${tool_calls.7.tool_input.file_path}",
+              "c7": "${tool_calls.7.tool_input.command}",
+              "p7": "${tool_calls.7.tool_input.pattern}",
+              "u7": "${tool_calls.7.tool_input.url}",
+              "q7": "${tool_calls.7.tool_input.query}",
+              "t8": "${tool_calls.8.tool_name}",
+              "f8": "${tool_calls.8.tool_input.file_path}",
+              "c8": "${tool_calls.8.tool_input.command}",
+              "p8": "${tool_calls.8.tool_input.pattern}",
+              "u8": "${tool_calls.8.tool_input.url}",
+              "q8": "${tool_calls.8.tool_input.query}",
+              "t9": "${tool_calls.9.tool_name}",
+              "f9": "${tool_calls.9.tool_input.file_path}",
+              "c9": "${tool_calls.9.tool_input.command}",
+              "p9": "${tool_calls.9.tool_input.pattern}",
+              "u9": "${tool_calls.9.tool_input.url}",
+              "q9": "${tool_calls.9.tool_input.query}",
+              "t10": "${tool_calls.10.tool_name}",
+              "f10": "${tool_calls.10.tool_input.file_path}",
+              "c10": "${tool_calls.10.tool_input.command}",
+              "p10": "${tool_calls.10.tool_input.pattern}",
+              "u10": "${tool_calls.10.tool_input.url}",
+              "q10": "${tool_calls.10.tool_input.query}",
+              "t11": "${tool_calls.11.tool_name}",
+              "f11": "${tool_calls.11.tool_input.file_path}",
+              "c11": "${tool_calls.11.tool_input.command}",
+              "p11": "${tool_calls.11.tool_input.pattern}",
+              "u11": "${tool_calls.11.tool_input.url}",
+              "q11": "${tool_calls.11.tool_input.query}",
+              "t12": "${tool_calls.12.tool_name}",
+              "f12": "${tool_calls.12.tool_input.file_path}",
+              "c12": "${tool_calls.12.tool_input.command}",
+              "p12": "${tool_calls.12.tool_input.pattern}",
+              "u12": "${tool_calls.12.tool_input.url}",
+              "q12": "${tool_calls.12.tool_input.query}",
+              "t13": "${tool_calls.13.tool_name}",
+              "f13": "${tool_calls.13.tool_input.file_path}",
+              "c13": "${tool_calls.13.tool_input.command}",
+              "p13": "${tool_calls.13.tool_input.pattern}",
+              "u13": "${tool_calls.13.tool_input.url}",
+              "q13": "${tool_calls.13.tool_input.query}",
+              "t14": "${tool_calls.14.tool_name}",
+              "f14": "${tool_calls.14.tool_input.file_path}",
+              "c14": "${tool_calls.14.tool_input.command}",
+              "p14": "${tool_calls.14.tool_input.pattern}",
+              "u14": "${tool_calls.14.tool_input.url}",
+              "q14": "${tool_calls.14.tool_input.query}",
+              "t15": "${tool_calls.15.tool_name}",
+              "f15": "${tool_calls.15.tool_input.file_path}",
+              "c15": "${tool_calls.15.tool_input.command}",
+              "p15": "${tool_calls.15.tool_input.pattern}",
+              "u15": "${tool_calls.15.tool_input.url}",
+              "q15": "${tool_calls.15.tool_input.query}",
+              "t16": "${tool_calls.16.tool_name}",
+              "f16": "${tool_calls.16.tool_input.file_path}",
+              "c16": "${tool_calls.16.tool_input.command}",
+              "p16": "${tool_calls.16.tool_input.pattern}",
+              "u16": "${tool_calls.16.tool_input.url}",
+              "q16": "${tool_calls.16.tool_input.query}",
+              "t17": "${tool_calls.17.tool_name}",
+              "f17": "${tool_calls.17.tool_input.file_path}",
+              "c17": "${tool_calls.17.tool_input.command}",
+              "p17": "${tool_calls.17.tool_input.pattern}",
+              "u17": "${tool_calls.17.tool_input.url}",
+              "q17": "${tool_calls.17.tool_input.query}",
+              "t18": "${tool_calls.18.tool_name}",
+              "f18": "${tool_calls.18.tool_input.file_path}",
+              "c18": "${tool_calls.18.tool_input.command}",
+              "p18": "${tool_calls.18.tool_input.pattern}",
+              "u18": "${tool_calls.18.tool_input.url}",
+              "q18": "${tool_calls.18.tool_input.query}",
+              "t19": "${tool_calls.19.tool_name}",
+              "f19": "${tool_calls.19.tool_input.file_path}",
+              "c19": "${tool_calls.19.tool_input.command}",
+              "p19": "${tool_calls.19.tool_input.pattern}",
+              "u19": "${tool_calls.19.tool_input.url}",
+              "q19": "${tool_calls.19.tool_input.query}"
+            },
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -182,7 +334,10 @@
             "server": "plugin:hiveboss:hiveboss",
             "tool": "hook_stop",
             "input": {
-              "session_id": "${session_id}"
+              "session_id": "${session_id}",
+              "cwd": "${cwd}",
+              "prompt_id": "${prompt_id}",
+              "stop_hook_active": "${stop_hook_active}"
             },
             "timeout": 2
           }
@@ -198,6 +353,19 @@
               "stop"
             ],
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/terminal-answer.mjs"
+            ],
+            "async": true,
+            "timeout": 15
           }
         ]
       }
